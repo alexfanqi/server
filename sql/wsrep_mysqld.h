@@ -79,6 +79,7 @@ extern const char* wsrep_start_position;
 extern ulong       wsrep_max_ws_size;
 extern ulong       wsrep_max_ws_rows;
 extern const char* wsrep_notify_cmd;
+extern const char* wsrep_allowlist;
 extern my_bool     wsrep_certify_nonPK;
 extern long int    wsrep_protocol_version;
 extern ulong       wsrep_forced_binlog_format;
@@ -227,11 +228,11 @@ extern bool wsrep_must_sync_wait (THD* thd, uint mask= WSREP_SYNC_WAIT_BEFORE_RE
 extern bool wsrep_sync_wait (THD* thd, uint mask= WSREP_SYNC_WAIT_BEFORE_READ);
 extern enum wsrep::provider::status
 wsrep_sync_wait_upto (THD* thd, wsrep_gtid_t* upto, int timeout);
-extern void wsrep_last_committed_id (wsrep_gtid_t* gtid);
 extern int  wsrep_check_opts();
 extern void wsrep_prepend_PATH (const char* path);
 extern bool wsrep_append_fk_parent_table(THD* thd, TABLE_LIST* table, wsrep::key_array* keys);
 extern bool wsrep_reload_ssl();
+extern bool wsrep_split_allowlist(std::vector<std::string>& allowlist);
 
 /* Other global variables */
 extern wsrep_seqno_t wsrep_locked_seqno;
@@ -407,7 +408,6 @@ bool wsrep_node_is_synced();
 void wsrep_init_SR();
 void wsrep_verify_SE_checkpoint(const wsrep_uuid_t& uuid, wsrep_seqno_t seqno);
 int wsrep_replay_from_SR_store(THD*, const wsrep_trx_meta_t&);
-void wsrep_node_uuid(wsrep_uuid_t&);
 
 class Log_event;
 int wsrep_ignored_error_code(Log_event* ev, int error);
