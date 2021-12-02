@@ -1020,9 +1020,19 @@ lock_rec_other_has_conflicting(
 {
 	bool	is_supremum = (heap_no == PAGE_HEAP_NO_SUPREMUM);
 
+	lock_sys.assert_locked(cell);
 	for (lock_t* lock = lock_sys_t::get_first(cell, id, heap_no);
 	     lock; lock = lock_rec_get_next(heap_no, lock)) {
-		if (lock_rec_has_to_wait(true, trx, mode, lock, is_supremum)) {
+		/* There is no need to lock lock_sys.wait_mutex to check
+		trx->lock.wait_trx because it's also protected with the cell
+		latch. There also can't be lock loops for one record, because
+		all waiting locks of the record  will always wait for the same
+		first lock of the record in a cell array, and check for
+		conflicting lock will always start with the first lock for the
+		heap_no, and go ahead with the same order(the order of the
+		locks in the cell array) */
+		if ((!lock->is_waiting() || lock->trx->lock.wait_trx != trx)
+		    && lock_rec_has_to_wait(true, trx, mode, lock, is_supremum)) {
 			return(lock);
 		}
 	}
@@ -4663,7 +4673,8 @@ func_exit:
 			} else
 #endif /* WITH_WSREP */
 			{
-				ut_ad(other_lock->is_waiting());
+				ut_ad(other_lock->is_waiting()
+				    || other_lock->trx->id == impl_trx_id);
 				ut_ad(lock_rec_has_expl(LOCK_X | LOCK_REC_NOT_GAP,
 						        cell, id, heap_no,
 							impl_trx));
