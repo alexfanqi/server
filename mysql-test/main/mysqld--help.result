@@ -43,8 +43,9 @@ The following specify which files/extra groups are read (specified before remain
  this automatically.
  --bind-address=name IP address to bind to.
  --binlog-alter-two-phase=name 
- If set split the alter into 2 statement START ALTER and
- COMMIT/ROLLBACKALTER. One of: No, Yes
+ When set, split ALTER at binary logging into 2
+ statements: START ALTER and COMMIT/ROLLBACK ALTER. One
+ of: No, Yes
  --binlog-annotate-row-events 
  Tells the master to annotate RBR events with the
  statement that caused these events
