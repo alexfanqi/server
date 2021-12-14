@@ -1945,10 +1945,16 @@ public:
 class Item_func_crc32 :public Item_long_func
 {
   bool check_arguments() const override
-  { return args[0]->check_type_can_return_str(func_name_cstring()); }
+  {
+    return args[0]->check_type_can_return_str(func_name_cstring()) &&
+      (arg_count == 1 ||
+       args[1]->check_type_can_return_int(func_name_cstring()));
+  }
   String value;
 public:
   Item_func_crc32(THD *thd, Item *a): Item_long_func(thd, a)
+  { unsigned_flag= 1; }
+  Item_func_crc32(THD *thd, Item *a, Item *b): Item_long_func(thd, a, b)
   { unsigned_flag= 1; }
   LEX_CSTRING func_name_cstring() const override
   {
@@ -1959,6 +1965,31 @@ public:
   longlong val_int() override;
   Item *get_copy(THD *thd) override
   { return get_item_copy<Item_func_crc32>(thd, this); }
+};
+
+class Item_func_crc32c :public Item_long_func
+{
+  bool check_arguments() const override
+  {
+    return args[0]->check_type_can_return_str(func_name_cstring()) &&
+      (arg_count == 1 ||
+       args[1]->check_type_can_return_int(func_name_cstring()));
+  }
+  String value;
+public:
+  Item_func_crc32c(THD *thd, Item *a): Item_long_func(thd, a)
+  { unsigned_flag= 1; }
+  Item_func_crc32c(THD *thd, Item *a, Item *b): Item_long_func(thd, a, b)
+  { unsigned_flag= 1; }
+  LEX_CSTRING func_name_cstring() const override
+  {
+    static LEX_CSTRING name= {STRING_WITH_LEN("crc32c") };
+    return name;
+  }
+  bool fix_length_and_dec() override { max_length=10; return FALSE; }
+  longlong val_int() override;
+  Item *get_copy(THD *thd) override
+  { return get_item_copy<Item_func_crc32c>(thd, this); }
 };
 
 class Item_func_uncompressed_length : public Item_long_func_length
