@@ -353,6 +353,7 @@ class Master_info : public Slave_reporting_capability
   */
   int semi_ack;
   List <start_alter_info> start_alter_list;
+  MEM_ROOT mem_root;
 };
 
 struct start_alter_thd_args

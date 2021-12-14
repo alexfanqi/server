@@ -653,11 +653,11 @@ enum start_alter_state
 struct start_alter_info
 {
   /*
-    Unique among replication channel at one point of time
-   */
-  uint64 sa_seq_no; //key for searching
+    ALTER id is defined as a pair of GTID's seq_no and domain_id.
+  */
+  decltype(rpl_gtid::seq_no) sa_seq_no; // key for searching (SA's id)
   uint32 domain_id;
-  bool   direct_commit_alter;
+  bool   direct_commit_alter; // when true CA thread executes the whole query
   /*
     0 prepared and not error from commit and rollback
     >0 error expected in commit/rollback

@@ -576,6 +576,7 @@ rpl_pause_for_ftwrl(THD *thd)
   uint32 i;
   rpl_parallel_thread_pool *pool= &global_rpl_thread_pool;
   int err;
+  Dynamic_array<Master_info*> mi_arr(4, 4); // array of replication source mi:s
   DBUG_ENTER("rpl_pause_for_ftwrl");
 
   /*
@@ -627,6 +628,33 @@ rpl_pause_for_ftwrl(THD *thd)
       mysql_cond_wait(&e->COND_parallel_entry, &e->LOCK_parallel_entry);
     };
     --e->need_sub_id_signal;
+
+    /*
+      Notify any source any domain waiting-for-master Start-Alter to give way.
+    */
+    Master_info *mi= e->rli->mi;
+    bool found= false;
+    for (uint i= 0; i < mi_arr.elements() && !found; i++)
+      found= mi_arr.at(i) == mi;
+    if (!found)
+    {
+      mi_arr.append(mi);
+      start_alter_info *info=NULL;
+      mysql_mutex_lock(&mi->start_alter_list_lock);
+      List_iterator<start_alter_info> info_iterator(mi->start_alter_list);
+      while ((info= info_iterator++))
+      {
+        mysql_mutex_lock(&mi->start_alter_lock);
+
+        DBUG_ASSERT(info->state == start_alter_state::REGISTERED);
+
+        info->state= start_alter_state::ROLLBACK_ALTER;
+        info->direct_commit_alter= true;
+        mysql_cond_broadcast(&info->start_alter_cond);
+        mysql_mutex_unlock(&mi->start_alter_lock);
+      }
+      mysql_mutex_unlock(&mi->start_alter_list_lock);
+    }
     thd->EXIT_COND(&old_stage);
     if (err)
       break;
@@ -2494,7 +2522,7 @@ rpl_parallel::~rpl_parallel()
 
 
 rpl_parallel_entry *
-rpl_parallel::find(uint32 domain_id)
+rpl_parallel::find(uint32 domain_id, Relay_log_info *rli)
 {
   struct rpl_parallel_entry *e;
 
@@ -2521,6 +2549,7 @@ rpl_parallel::find(uint32 domain_id)
     e->stop_on_error_sub_id= (uint64)ULONGLONG_MAX;
     e->pause_sub_id= (uint64)ULONGLONG_MAX;
     e->pending_start_alters= 0;
+    e->rli= rli;
     if (my_hash_insert(&domain_hash, (uchar *)e))
     {
       my_free(e);
@@ -2531,7 +2560,11 @@ rpl_parallel::find(uint32 domain_id)
     mysql_cond_init(key_COND_parallel_entry, &e->COND_parallel_entry, NULL);
   }
   else
+  {
+    DBUG_ASSERT(rli == e->rli);
+
     e->force_abort= false;
+  }
 
   return e;
 }
@@ -2965,7 +2998,7 @@ rpl_parallel::do_event(rpl_group_info *serial_rgi, Log_event *ev,
     uint32 domain_id= (rli->mi->using_gtid == Master_info::USE_GTID_NO ||
                        rli->mi->parallel_mode <= SLAVE_PARALLEL_MINIMAL ?
                        0 : gtid_ev->domain_id);
-    if (!(e= find(domain_id)))
+    if (!(e= find(domain_id, rli)))
     {
       my_error(ER_OUT_OF_RESOURCES, MYF(MY_WME));
       delete ev;

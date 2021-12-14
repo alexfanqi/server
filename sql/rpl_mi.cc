@@ -100,6 +100,7 @@ Master_info::Master_info(LEX_CSTRING *connection_name_arg,
   mysql_cond_init(key_master_info_start_cond, &start_cond, NULL);
   mysql_cond_init(key_master_info_stop_cond, &stop_cond, NULL);
   mysql_cond_init(key_master_info_sleep_cond, &sleep_cond, NULL);
+  init_sql_alloc(PSI_INSTRUMENT_ME, &mem_root, MEM_ROOT_BLOCK_SIZE, 0, MYF(0));
 }
 
 
@@ -135,6 +136,7 @@ Master_info::~Master_info()
   mysql_cond_destroy(&start_cond);
   mysql_cond_destroy(&stop_cond);
   mysql_cond_destroy(&sleep_cond);
+  free_root(&mem_root, MYF(0));
 }
 
 /**

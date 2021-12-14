@@ -597,8 +597,7 @@ private:
            has been completed
 */
 bool write_bin_log_start_alter(THD *thd, bool& partial_alter,
-                               uint64 start_alter_id, bool if_exists,
-                               MEM_ROOT *mem)
+                               uint64 start_alter_id, bool if_exists)
 {
 #if defined(HAVE_REPLICATION)
   if (start_alter_id)
@@ -606,6 +605,10 @@ bool write_bin_log_start_alter(THD *thd, bool& partial_alter,
     if (thd->rgi_slave->get_finish_event_group_called())
       return false;                   // can get here through retrying
 
+    DBUG_EXECUTE_IF("at_write_start_alter", {
+    debug_sync_set_action(thd,
+                          STRING_WITH_LEN("now wait_for alter_cont"));
+      });
 
     Master_info *mi= thd->rgi_slave->rli->mi;
     start_alter_info *info= thd->rgi_slave->sa_info;
@@ -614,7 +617,7 @@ bool write_bin_log_start_alter(THD *thd, bool& partial_alter,
     info->domain_id= thd->variables.gtid_domain_id;
     info->state= start_alter_state::REGISTERED;
     mysql_mutex_lock(&mi->start_alter_list_lock);
-    mi->start_alter_list.push_back(info, mem);
+    mi->start_alter_list.push_back(info, &mi->mem_root);
     mysql_mutex_unlock(&mi->start_alter_list_lock);
     thd->rgi_slave->commit_orderer.wait_for_prior_commit(thd);
     thd->rgi_slave->start_alter_ev->update_pos(thd->rgi_slave);
@@ -6568,6 +6571,7 @@ MYSQL_BIN_LOG::lookup_domain_in_binlog_state(uint32 domain_id,
 
   return false;
 }
+
 
 int
 MYSQL_BIN_LOG::bump_seq_no_counter_if_needed(uint32 domain_id, uint64 seq_no)

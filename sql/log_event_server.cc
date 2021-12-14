@@ -1730,6 +1730,7 @@ int Query_log_event::handle_split_alter_query_log_event(rpl_group_info *rgi,
   }
   start_alter_info *info=NULL;
   Master_info *mi= NULL;
+  bool is_direct= false;
 
   rgi->gtid_ev_sa_seq_no= sa_seq_no;
   // is set for both the direct execution and the write to binlog
@@ -1743,6 +1744,10 @@ int Query_log_event::handle_split_alter_query_log_event(rpl_group_info *rgi,
       if(info->sa_seq_no == rgi->gtid_ev_sa_seq_no &&
          info->domain_id == rgi->current_gtid.domain_id)
       {
+        is_direct= info->direct_commit_alter;
+
+        DBUG_ASSERT(!is_direct || info->state == start_alter_state::COMPLETED);
+
         info_iterator.remove();
         break;
       }
@@ -1750,7 +1755,7 @@ int Query_log_event::handle_split_alter_query_log_event(rpl_group_info *rgi,
   }
   mysql_mutex_unlock(&mi->start_alter_list_lock);
 
-  if (!info )
+  if (!info || is_direct)
   {
     if (is_CA)
     {
@@ -1759,7 +1764,7 @@ int Query_log_event::handle_split_alter_query_log_event(rpl_group_info *rgi,
         wait for master reply in mysql_alter_table (in wait_for_master)
       */
       rgi->direct_commit_alter= true;
-      return rc;
+      goto cleanup;
     }
     else
     {
@@ -1769,28 +1774,34 @@ int Query_log_event::handle_split_alter_query_log_event(rpl_group_info *rgi,
   }
 
   mysql_mutex_lock(&mi->start_alter_lock);
+  if (info->state != start_alter_state::COMPLETED)
+  {
+    if (is_CA)
+      info->state= start_alter_state::COMMIT_ALTER;
+    else
+      info->state= start_alter_state::ROLLBACK_ALTER;
+    mysql_cond_broadcast(&info->start_alter_cond);
+    mysql_mutex_unlock(&mi->start_alter_lock);
+    /*
+      Wait till Start Alter worker has changed the state to ::COMPLETED
+      when start alter worker reaches the old code write_bin_log(), it will
+      change state to COMMITTED.
+      COMMITTED and `direct_commit_alter == true` at the same time indicates
+      the query needs re-execution by the CA running thread.
+    */
+    mysql_mutex_lock(&mi->start_alter_lock);
 
-  DBUG_ASSERT(info->state == start_alter_state::REGISTERED);
+    DBUG_ASSERT(info->state == start_alter_state::COMPLETED ||
+                !info->direct_commit_alter);
 
-  if (is_CA)
-    info->state= start_alter_state::COMMIT_ALTER;
+    while(info->state != start_alter_state::COMPLETED)
+      mysql_cond_wait(&info->start_alter_cond, &mi->start_alter_lock);
+  }
   else
-    info->state= start_alter_state::ROLLBACK_ALTER;
-  mysql_cond_broadcast(&info->start_alter_cond);
-  mysql_mutex_unlock(&mi->start_alter_lock);
-
-  /*
-    Wait till Start Alter worker has changed the state to ::COMPLETED
-    when start alter worker reaches the old code write_bin_log(), it will
-    change state to COMMITTED
-  */
-  mysql_mutex_lock(&mi->start_alter_lock);
-
-  DBUG_ASSERT(info->state == start_alter_state::COMPLETED ||
-              !info->direct_commit_alter);
-
-  while(info->state != start_alter_state::COMPLETED)
-    mysql_cond_wait(&info->start_alter_cond, &mi->start_alter_lock);
+  {
+    // SA has completed and left being kicked out by deadlock or ftwrl
+      DBUG_ASSERT(info->direct_commit_alter);
+  }
   mysql_mutex_unlock(&mi->start_alter_lock);
 
   if (info->direct_commit_alter)

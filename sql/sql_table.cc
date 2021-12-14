@@ -94,12 +94,12 @@ static int mysql_prepare_create_table(THD *, HA_CREATE_INFO *, Alter_info *,
 static uint blob_length_by_type(enum_field_types type);
 static bool fix_constraints_names(THD *, List<Virtual_column_info> *,
                                   const HA_CREATE_INFO *);
-bool write_bin_log_start_alter(THD *thd, bool& partial_alter,
-                               uint64 start_alter_id, bool log_if_exists,
-                               MEM_ROOT *mem);
 static bool wait_for_master(THD *thd);
 static int process_master_state(THD *thd, int alter_result,
                                 uint64 &start_alter_id);
+static bool
+write_bin_log_start_alter_rollback(THD *thd, uint64 &start_alter_id,
+                                   bool &partial_alter, bool if_exists);
 
 /**
   @brief Helper function for explain_filename
@@ -7328,6 +7328,19 @@ write_bin_log_start_alter_rollback(THD *thd, uint64 &start_alter_id,
       */
       return true;
     }
+    if (info->direct_commit_alter)
+    {
+      DBUG_ASSERT(info->state == start_alter_state::ROLLBACK_ALTER);
+
+      /*
+        SA may end up in the rollback state through FTWRL that breaks
+        SA's waiting for a master decision.
+        Then it completes "officially", and `direct_commit_alter` true status
+        will affect the future of CA to re-execute the whole query.
+      */
+      info->state= start_alter_state::COMPLETED;
+      return true; // not really an error to be handled by caller specifically
+    }
     /*
       We have to call wait for master here because in main calculation
       we can error out before calling wait for master
@@ -7489,7 +7502,7 @@ static bool mysql_inplace_alter_table(THD *thd,
 
   if (table->s->tmp_table == NO_TMP_TABLE)
     if (write_bin_log_start_alter(thd, partial_alter, start_alter_id,
-                                  if_exists, &table->s->mem_root))
+                                  if_exists))
       goto cleanup;
 
   DBUG_EXECUTE_IF("start_alter_kill_after_binlog", {
@@ -10630,7 +10643,7 @@ do_continue:;
 
   if (table->s->tmp_table == NO_TMP_TABLE)
     if (write_bin_log_start_alter(thd, partial_alter, start_alter_id,
-                                  if_exists, &table->s->mem_root))
+                                  if_exists))
       goto err_new_table_cleanup;
 
   DBUG_EXECUTE_IF("start_alter_delay_master", {
