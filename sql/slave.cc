@@ -5625,28 +5625,6 @@ pthread_handler_t handle_slave_sql(void *arg)
   if (mi->using_parallel())
   {
     rli->parallel.wait_for_done(thd, rli);
-    /*
-     shutdown the loner alter threads waiting on C/R ALter
-    */
-    start_alter_info *info=NULL;
-    mysql_mutex_lock(&mi->start_alter_list_lock);
-    List_iterator<start_alter_info> info_iterator(mi->start_alter_list);
-    while ((info= info_iterator++))
-    {
-      mysql_mutex_lock(&mi->start_alter_lock);
-      info->state= start_alter_state::ROLLBACK_ALTER;
-      mysql_cond_broadcast(&info->start_alter_cond);
-      mysql_mutex_unlock(&mi->start_alter_lock);
-      mysql_mutex_lock(&mi->start_alter_lock);
-      while(info->state == start_alter_state::ROLLBACK_ALTER)
-        mysql_cond_wait(&info->start_alter_cond, &mi->start_alter_lock);
-      mysql_mutex_unlock(&mi->start_alter_lock);
-      DBUG_ASSERT(info->state == start_alter_state::COMPLETED);
-      info_iterator.remove();
-      mysql_cond_destroy(&info->start_alter_cond);
-      my_free(info);
-    }
-    mysql_mutex_unlock(&mi->start_alter_list_lock);
   };
  /* Gtid_list_log_event::do_apply_event has already reported the GTID until */
   if (rli->stop_for_until && rli->until_condition != Relay_log_info::UNTIL_GTID)
@@ -5769,7 +5747,7 @@ err_during_init:
   /* Forget the relay log's format */
   delete rli->relay_log.description_event_for_exec;
   rli->relay_log.description_event_for_exec= 0;
-  //rli->reset_inuse_relaylog();
+  rli->reset_inuse_relaylog();
   /* Wake up master_pos_wait() */
   mysql_mutex_unlock(&rli->data_lock);
   DBUG_PRINT("info",("Signaling possibly waiting master_pos_wait() functions"));

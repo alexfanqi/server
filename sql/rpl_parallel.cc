@@ -2581,7 +2581,7 @@ rpl_parallel::wait_for_done(THD *thd, Relay_log_info *rli)
   struct rpl_parallel_entry *e;
   rpl_parallel_thread *rpt;
   uint32 i, j;
-
+  Master_info *mi= rli->mi;
   /*
     First signal all workers that they must force quit; no more events will
     be queued to complete any partial event groups executed.
@@ -2632,6 +2632,31 @@ rpl_parallel::wait_for_done(THD *thd, Relay_log_info *rli)
   };);
 
   global_rpl_thread_pool.copy_pool_for_pfs(rli);
+  /*
+    Shutdown SA,CA|RC alter threads through marking their execution states
+    to force their early rollback exit. Upon that the threads much reach
+    the same docking position as other "regular" threads.
+  */
+  start_alter_info *info=NULL;
+  mysql_mutex_lock(&mi->start_alter_list_lock);
+  List_iterator<start_alter_info> info_iterator(mi->start_alter_list);
+  while ((info= info_iterator++))
+  {
+    mysql_mutex_lock(&mi->start_alter_lock);
+    info->state= start_alter_state::ROLLBACK_ALTER;
+    mysql_cond_broadcast(&info->start_alter_cond);
+    mysql_mutex_unlock(&mi->start_alter_lock);
+    mysql_mutex_lock(&mi->start_alter_lock);
+    while(info->state == start_alter_state::ROLLBACK_ALTER)
+      mysql_cond_wait(&info->start_alter_cond, &mi->start_alter_lock);
+    mysql_mutex_unlock(&mi->start_alter_lock);
+    DBUG_ASSERT(info->state == start_alter_state::COMPLETED);
+    info_iterator.remove();
+    mysql_cond_destroy(&info->start_alter_cond);
+    my_free(info);
+  }
+  mysql_mutex_unlock(&mi->start_alter_list_lock);
+
   for (i= 0; i < domain_hash.records; ++i)
   {
     e= (struct rpl_parallel_entry *)my_hash_element(&domain_hash, i);
@@ -2639,14 +2664,6 @@ rpl_parallel::wait_for_done(THD *thd, Relay_log_info *rli)
     {
       if ((rpt= e->rpl_threads[j]))
       {
-        /*
-         Dont wait for SA workers , But wait for CA/RA workers
-         If CA/RA is executed that means corresponding SA is also executed
-         And remaning SA will never recieve CA/RA so we have to manualy send it
-        */
-        if (rpt->thd->rgi_slave &&
-           (rpt->thd->rgi_slave->gtid_ev_flags_extra & Gtid_log_event::FL_START_ALTER_E1))
-          continue;
         mysql_mutex_lock(&rpt->LOCK_rpl_thread);
         while (rpt->current_owner == &e->rpl_threads[j])
           mysql_cond_wait(&rpt->COND_rpl_thread_stop, &rpt->LOCK_rpl_thread);

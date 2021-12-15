@@ -3,6 +3,8 @@
 #    Session as well as global
 #    Allowed values NO_SPLIT, SPLIT, BINLOG_ONLY (0,1,2)
 
+--source include/not_embedded.inc
+
 --let $binlog_alter_two_phase= `select @@binlog_alter_two_phase`
 set binlog_alter_two_phase=NO;
 select @@binlog_alter_two_phase;
