@@ -615,10 +615,16 @@ bool write_bin_log_start_alter(THD *thd, bool& partial_alter,
 
     info->sa_seq_no= start_alter_id;
     info->domain_id= thd->variables.gtid_domain_id;
-    info->state= start_alter_state::REGISTERED;
     mysql_mutex_lock(&mi->start_alter_list_lock);
+    info->shutdown= mi->is_shutdown;
     mi->start_alter_list.push_back(info, &mi->mem_root);
     mysql_mutex_unlock(&mi->start_alter_list_lock);
+    info->state= start_alter_state::REGISTERED;
+    if (info->shutdown)  // p.3 of the 3rd requirement (STOP-SLAVE, SA, [CA])
+    {
+      info->state= start_alter_state::ROLLBACK_ALTER;
+      return true;
+    }
     thd->rgi_slave->commit_orderer.wait_for_prior_commit(thd);
     thd->rgi_slave->start_alter_ev->update_pos(thd->rgi_slave);
     if (mysql_bin_log.is_open())

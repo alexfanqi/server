@@ -354,6 +354,13 @@ class Master_info : public Slave_reporting_capability
   int semi_ack;
   List <start_alter_info> start_alter_list;
   MEM_ROOT mem_root;
+  /*
+    Flag is raised by the parallel worker slave stop. It's needed
+    solely for Start Alter event to mark its state accordingly at time
+    it's about to change the alter execution state to Registered.
+    When it's true, the state instead will be set for rollback.
+  */
+  bool is_shutdown;
 };
 
 struct start_alter_thd_args

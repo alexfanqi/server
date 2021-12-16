@@ -7328,7 +7328,7 @@ write_bin_log_start_alter_rollback(THD *thd, uint64 &start_alter_id,
       */
       return true;
     }
-    if (info->direct_commit_alter)
+    if (info->direct_commit_alter || info->shutdown)   // the final phase of p.3
     {
       DBUG_ASSERT(info->state == start_alter_state::ROLLBACK_ALTER);
 

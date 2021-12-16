@@ -1664,6 +1664,7 @@ static start_alter_info *get_new_start_alter_info(THD *thd)
   info->sa_seq_no= 0;
   info->domain_id= 0;
   info->direct_commit_alter= false;
+  info->shutdown= false;
   info->state= start_alter_state::INVALID;
   mysql_cond_init(0, &info->start_alter_cond, NULL);
   info->error= 0;
@@ -1800,10 +1801,15 @@ int Query_log_event::handle_split_alter_query_log_event(rpl_group_info *rgi,
   else
   {
     // SA has completed and left being kicked out by deadlock or ftwrl
-      DBUG_ASSERT(info->direct_commit_alter);
+      DBUG_ASSERT(info->direct_commit_alter || info->shutdown);
   }
   mysql_mutex_unlock(&mi->start_alter_lock);
 
+  if (info->shutdown) // This is SA,STOP-SLAVE,CA case of the requirements #1-2 and p.4 of #3
+  {
+    rc= 1;        // do not exec nor binlog
+    goto cleanup;
+  }
   if (info->direct_commit_alter)
     goto cleanup;
 

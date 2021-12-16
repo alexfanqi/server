@@ -2640,20 +2640,23 @@ rpl_parallel::wait_for_done(THD *thd, Relay_log_info *rli)
   start_alter_info *info=NULL;
   mysql_mutex_lock(&mi->start_alter_list_lock);
   List_iterator<start_alter_info> info_iterator(mi->start_alter_list);
+  mi->is_shutdown= true;   // marking for any new SA
   while ((info= info_iterator++))
   {
     mysql_mutex_lock(&mi->start_alter_lock);
     info->state= start_alter_state::ROLLBACK_ALTER;
-    mysql_cond_broadcast(&info->start_alter_cond);
+    info->shutdown= true;   // mark the existing list members
+    mysql_cond_broadcast(&info->start_alter_cond); // notify SA:s
     mysql_mutex_unlock(&mi->start_alter_lock);
+
+    // wait for SA:s to end up in COMPLETED state which also involves signaling
+    // to any waiting CA or RA.
     mysql_mutex_lock(&mi->start_alter_lock);
     while(info->state == start_alter_state::ROLLBACK_ALTER)
       mysql_cond_wait(&info->start_alter_cond, &mi->start_alter_lock);
     mysql_mutex_unlock(&mi->start_alter_lock);
+
     DBUG_ASSERT(info->state == start_alter_state::COMPLETED);
-    info_iterator.remove();
-    mysql_cond_destroy(&info->start_alter_cond);
-    my_free(info);
   }
   mysql_mutex_unlock(&mi->start_alter_list_lock);
 
@@ -2671,6 +2674,17 @@ rpl_parallel::wait_for_done(THD *thd, Relay_log_info *rli)
       }
     }
   }
+  // Now all threads are docked, the alter states are safe to destroy
+  mysql_mutex_lock(&mi->start_alter_list_lock);
+  info_iterator.rewind();
+  while ((info= info_iterator++))   // the final phase of p.5
+  {
+    info_iterator.remove();
+    mysql_cond_destroy(&info->start_alter_cond);
+    my_free(info);
+  }
+  mi->is_shutdown= false;
+  mysql_mutex_unlock(&mi->start_alter_list_lock);
 }
 
 
