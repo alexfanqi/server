@@ -658,7 +658,8 @@ struct start_alter_info
   decltype(rpl_gtid::seq_no) sa_seq_no; // key for searching (SA's id)
   uint32 domain_id;
   bool   direct_commit_alter; // when true CA thread executes the whole query
-  bool   shutdown;            // when true CA,RA exist without their job done
+  bool   shutdown;  // when true any SA completes but returns with a rollback
+                    // state so CA,RA exist without their job done
   /*
     0 prepared and not error from commit and rollback
     >0 error expected in commit/rollback
@@ -873,6 +874,7 @@ struct rpl_group_info
   rpl_parallel_thread *rpt;
   Query_log_event *start_alter_ev;
   bool direct_commit_alter;
+  bool is_shutdown;
   start_alter_info *sa_info;
 
   rpl_group_info(Relay_log_info *rli_);

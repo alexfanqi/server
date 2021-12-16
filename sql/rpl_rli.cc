@@ -2159,7 +2159,7 @@ rpl_group_info::reinit(Relay_log_info *rli)
   speculation= SPECULATE_NO;
   rpt= NULL;
   start_alter_ev= NULL;
-  direct_commit_alter= false;
+  direct_commit_alter= is_shutdown= false;
   commit_orderer.reinit();
 }
 
@@ -2169,7 +2169,8 @@ rpl_group_info::rpl_group_info(Relay_log_info *rli)
     deferred_events(NULL), m_annotate_event(0), is_parallel_exec(false),
     gtid_ev_flags2(0), gtid_ev_flags_extra(0), gtid_ev_sa_seq_no(0),
     reserved_start_alter_thread(0), finish_event_group_called(0), rpt(NULL),
-    start_alter_ev(NULL), direct_commit_alter(false), sa_info(NULL)
+    start_alter_ev(NULL), direct_commit_alter(false), is_shutdown(false),
+    sa_info(NULL)
 {
   reinit(rli);
   bzero(&current_gtid, sizeof(current_gtid));

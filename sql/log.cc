@@ -612,17 +612,23 @@ bool write_bin_log_start_alter(THD *thd, bool& partial_alter,
 
     Master_info *mi= thd->rgi_slave->rli->mi;
     start_alter_info *info= thd->rgi_slave->sa_info;
+    bool is_shutdown= false;
 
     info->sa_seq_no= start_alter_id;
     info->domain_id= thd->variables.gtid_domain_id;
     mysql_mutex_lock(&mi->start_alter_list_lock);
-    info->shutdown= mi->is_shutdown;
+    // possible stop-slave's marking of the whole alter state list is checked
+    is_shutdown= mi->is_shutdown;
     mi->start_alter_list.push_back(info, &mi->mem_root);
     mysql_mutex_unlock(&mi->start_alter_list_lock);
     info->state= start_alter_state::REGISTERED;
-    if (info->shutdown)  // p.3 of the 3rd requirement (STOP-SLAVE, SA, [CA])
+    if (is_shutdown)
     {
+      mysql_mutex_lock(&mi->start_alter_lock);
+      thd->rgi_slave->is_shutdown= info->shutdown= true;
       info->state= start_alter_state::ROLLBACK_ALTER;
+      mysql_mutex_unlock(&mi->start_alter_lock);
+
       return true;
     }
     thd->rgi_slave->commit_orderer.wait_for_prior_commit(thd);

@@ -3930,9 +3930,15 @@ apply_event_and_update_pos_apply(Log_event* ev, THD* thd, rpl_group_info *rgi,
   DBUG_PRINT("info", ("apply_event error = %d", exec_res));
   if (exec_res == 0)
   {
-    if (thd->rgi_slave && (thd->rgi_slave->gtid_ev_flags_extra &
-                           Gtid_log_event::FL_START_ALTER_E1) &&
-        thd->rgi_slave->get_finish_event_group_called())
+    if (thd->rgi_slave &&
+        (((thd->rgi_slave->gtid_ev_flags_extra &
+           Gtid_log_event::FL_START_ALTER_E1) &&
+          thd->rgi_slave->get_finish_event_group_called()) ||
+         ((thd->rgi_slave->gtid_ev_flags_extra &
+           (Gtid_log_event::FL_START_ALTER_E1  |
+            Gtid_log_event::FL_COMMIT_ALTER_E1 |
+            Gtid_log_event::FL_ROLLBACK_ALTER_E1)) &&
+          thd->rgi_slave->is_shutdown)))
       DBUG_RETURN(exec_res ? 1 : 0);
     int error= ev->update_pos(rgi);
  #ifndef DBUG_OFF

@@ -2640,7 +2640,7 @@ rpl_parallel::wait_for_done(THD *thd, Relay_log_info *rli)
   start_alter_info *info=NULL;
   mysql_mutex_lock(&mi->start_alter_list_lock);
   List_iterator<start_alter_info> info_iterator(mi->start_alter_list);
-  mi->is_shutdown= true;   // marking for any new SA
+  mi->is_shutdown= true;   // a sign to stop in concurrently coming in new SA:s
   while ((info= info_iterator++))
   {
     mysql_mutex_lock(&mi->start_alter_lock);
@@ -2649,7 +2649,7 @@ rpl_parallel::wait_for_done(THD *thd, Relay_log_info *rli)
     mysql_cond_broadcast(&info->start_alter_cond); // notify SA:s
     mysql_mutex_unlock(&mi->start_alter_lock);
 
-    // wait for SA:s to end up in COMPLETED state which also involves signaling
+    // wait for SA:s to end up in COMPLETED state which also gets signaled
     // to any waiting CA or RA.
     mysql_mutex_lock(&mi->start_alter_lock);
     while(info->state == start_alter_state::ROLLBACK_ALTER)
@@ -2659,6 +2659,11 @@ rpl_parallel::wait_for_done(THD *thd, Relay_log_info *rli)
     DBUG_ASSERT(info->state == start_alter_state::COMPLETED);
   }
   mysql_mutex_unlock(&mi->start_alter_list_lock);
+
+  DBUG_EXECUTE_IF("rpl_slave_stop_CA_before_binlog",
+    {
+      debug_sync_set_action(thd, STRING_WITH_LEN("now signal proceed_CA_1"));
+    });
 
   for (i= 0; i < domain_hash.records; ++i)
   {
@@ -2674,10 +2679,10 @@ rpl_parallel::wait_for_done(THD *thd, Relay_log_info *rli)
       }
     }
   }
-  // Now all threads are docked, the alter states are safe to destroy
+  // Now all threads are docked, remained alter states are safe to destroy
   mysql_mutex_lock(&mi->start_alter_list_lock);
   info_iterator.rewind();
-  while ((info= info_iterator++))   // the final phase of p.5
+  while ((info= info_iterator++))
   {
     info_iterator.remove();
     mysql_cond_destroy(&info->start_alter_cond);
