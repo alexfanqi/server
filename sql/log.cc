@@ -600,6 +600,9 @@ bool write_bin_log_start_alter(THD *thd, bool& partial_alter,
                                uint64 start_alter_id, bool if_exists)
 {
 #if defined(HAVE_REPLICATION)
+  if (!(thd->variables.option_bits & OPTION_BIN_LOG))
+    return false;
+
   if (start_alter_id)
   {
     if (thd->rgi_slave->get_finish_event_group_called())
