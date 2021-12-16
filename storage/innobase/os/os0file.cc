@@ -2178,39 +2178,10 @@ os_file_create_func(
 		return(OS_FILE_CLOSED);
 	}
 
-	DWORD		attributes = 0;
+	DWORD attributes = (purpose == OS_FILE_AIO && srv_use_native_aio)
+		? FILE_FLAG_OVERLAPPED : 0;
 
-	if (purpose == OS_FILE_AIO) {
-
-#ifdef WIN_ASYNC_IO
-		/* If specified, use asynchronous (overlapped) io and no
-		buffering of writes in the OS */
-
-		if (srv_use_native_aio) {
-			attributes |= FILE_FLAG_OVERLAPPED;
-		}
-#endif /* WIN_ASYNC_IO */
-
-	} else if (purpose == OS_FILE_NORMAL) {
-
-		/* Use default setting. */
-
-	} else {
-
-		ib::error()
-			<< "Unknown purpose flag (" << purpose << ") "
-			<< "while opening file '" << name << "'";
-
-		return(OS_FILE_CLOSED);
-	}
-
-	if (type == OS_LOG_FILE) {
-		/* There is not reason to use buffered write to logs.*/
-		attributes |= FILE_FLAG_NO_BUFFERING;
-	}
-
-	switch (srv_file_flush_method)
-	{
+	switch (srv_file_flush_method) {
 	case SRV_O_DSYNC:
 		if (type == OS_LOG_FILE) {
 			/* Map O_DSYNC to FILE_WRITE_THROUGH */
@@ -2220,40 +2191,20 @@ os_file_create_func(
 
 	case SRV_O_DIRECT_NO_FSYNC:
 	case SRV_O_DIRECT:
-		if (type != OS_DATA_FILE) {
-			break;
-		}
-		/* fall through */
 	case SRV_ALL_O_DIRECT_FSYNC:
-		/*Traditional Windows behavior, no buffering for any files.*/
-		if (type != OS_DATA_FILE_NO_O_DIRECT) {
+		if (type == OS_DATA_FILE) {
 			attributes |= FILE_FLAG_NO_BUFFERING;
 		}
 		break;
 
 	case SRV_FSYNC:
 	case SRV_LITTLESYNC:
-		break;
-
 	case SRV_NOSYNC:
-		/* Let Windows cache manager handle all writes.*/
-		attributes &= ~(FILE_FLAG_WRITE_THROUGH | FILE_FLAG_NO_BUFFERING);
 		break;
 
 	default:
 		ut_a(false); /* unknown flush mode.*/
 	}
-
-
-	// TODO: Create a bug, this looks wrong. The flush log
-	// parameter is dynamic.
-	if (type == OS_LOG_FILE && srv_flush_log_at_trx_commit == 2) {
-		/* Do not use unbuffered i/o for the log files because
-		value 2 denotes that we do not flush the log at every
-		commit, but only once per second */
-		attributes &= ~(FILE_FLAG_WRITE_THROUGH | FILE_FLAG_NO_BUFFERING);
-	}
-
 
 	DWORD	access = GENERIC_READ;
 
@@ -2268,18 +2219,6 @@ os_file_create_func(
 		file = CreateFile(
 			name, access, share_mode, my_win_file_secattr(),
 			create_flag, attributes, NULL);
-
-		/* If FILE_FLAG_NO_BUFFERING was set, check if this can work at all,
-		for expected IO sizes. Reopen without the unbuffered flag, if it is won't work*/
-		if ((file != INVALID_HANDLE_VALUE)
-			&& (attributes & FILE_FLAG_NO_BUFFERING)
-			&& (type == OS_LOG_FILE)
-			&& !unbuffered_io_possible(file, OS_FILE_LOG_BLOCK_SIZE)) {
-				ut_a(CloseHandle(file));
-				attributes &= ~FILE_FLAG_NO_BUFFERING;
-				create_flag = OPEN_ALWAYS;
-				continue;
-		}
 
 		*success = (file != INVALID_HANDLE_VALUE);
 		if (*success) {
@@ -3843,8 +3782,9 @@ void os_aio_wait_until_no_pending_reads()
 dberr_t os_aio(const IORequest &type, void *buf, os_offset_t offset, size_t n)
 {
 	ut_ad(n > 0);
-	ut_ad((n % OS_FILE_LOG_BLOCK_SIZE) == 0);
-	ut_ad((offset % OS_FILE_LOG_BLOCK_SIZE) == 0);
+	ut_ad(!(n & 511)); /* payload of page_compressed tables */
+	ut_ad((offset % UNIV_ZIP_SIZE_MIN) == 0);
+	ut_ad((reinterpret_cast<size_t>(buf) % UNIV_ZIP_SIZE_MIN) == 0);
 	ut_ad(type.is_read() || type.is_write());
 	ut_ad(type.node);
 	ut_ad(type.node->is_open());
@@ -3895,11 +3835,6 @@ func_exit:
 	cb->m_offset = offset;
 	cb->m_opcode = type.is_read() ? tpool::aio_opcode::AIO_PREAD : tpool::aio_opcode::AIO_PWRITE;
 	new (cb->m_userdata) IORequest{type};
-
-	ut_a(reinterpret_cast<size_t>(cb->m_buffer) % OS_FILE_LOG_BLOCK_SIZE
-	     == 0);
-	ut_a(cb->m_len % OS_FILE_LOG_BLOCK_SIZE == 0);
-	ut_a(cb->m_offset % OS_FILE_LOG_BLOCK_SIZE == 0);
 
 	if (srv_thread_pool->submit_io(cb)) {
 		slots->release(cb);
