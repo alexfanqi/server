@@ -861,11 +861,19 @@ MARK_AS_ADVANCED(NO_ALARM)
 
 
 CHECK_CXX_SOURCE_COMPILES("
+#include <atomic>
+std::atomic<long long int> x;
+std::atomic<long int> y;
+std::atomic<int> z;
+std::atomic<short> s;
+std::atomic<char> t;
 int main()
 {
-  long long int var= 1;
-  long long int *ptr= &var;
-  return (int)__atomic_load_n(ptr, __ATOMIC_SEQ_CST);
+  ++x;
+  ++y;
+  ++z;
+  ++s;
+  return ++t;
 }"
 HAVE_GCC_C11_ATOMICS_WITHOUT_LIBATOMIC)
 IF (HAVE_GCC_C11_ATOMICS_WITHOUT_LIBATOMIC)
@@ -874,11 +882,19 @@ ELSE()
   SET(OLD_CMAKE_REQUIRED_LIBRARIES ${CMAKE_REQUIRED_LIBRARIES})
   LIST(APPEND CMAKE_REQUIRED_LIBRARIES "atomic")
   CHECK_CXX_SOURCE_COMPILES("
+  #include <atomic>
+  std::atomic<long long int> x;
+  std::atomic<long int> y;
+  std::atomic<int> z;
+  std::atomic<short> s;
+  std::atomic<char> t;
   int main()
   {
-    long long int var= 1;
-    long long int *ptr= &var;
-    return (int)__atomic_load_n(ptr, __ATOMIC_SEQ_CST);
+    ++x;
+    ++y;
+    ++z;
+    ++s;
+    return ++t;
   }"
   HAVE_GCC_C11_ATOMICS_WITH_LIBATOMIC)
   IF(HAVE_GCC_C11_ATOMICS_WITH_LIBATOMIC)
